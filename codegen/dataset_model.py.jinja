@@ -1,0 +1,72 @@
+import typing
+from typing import List, Optional, Protocol, Union
+from datetime import datetime
+from pydantic import BaseModel, Field
+from sodapy import Socrata
+
+
+class NycOpenDataset(Protocol):
+
+    @staticmethod
+    def get_model_name() -> str:
+        ...
+
+    @staticmethod
+    def get_model_id() -> str:
+        ...
+
+
+{% for dataset in datasets %}
+class {{ dataset.resource._class_name }}(BaseModel):
+    """
+    {{ dataset.resource.description.replace('"""', '') }}
+
+    {{ dataset.link }}
+    """
+    {# _dataset = {{ dataset._as_code() }} #}
+    {% for column in dataset.resource.columns %}
+    {{ column.cleaned_name() }}: Optional[{{ column.datatype.type_annotation }}]{% if column.needs_cleaning() %} = Field(None, alias='''{{ column.name}}'''){% endif %}{% endfor %}
+    
+
+    @staticmethod
+    def get_model_name() -> str:
+        return '''{{ dataset.resource.name }}'''
+
+    @staticmethod
+    def get_model_id() -> str:
+        return '''{{ dataset.resource.id }}'''
+
+{% endfor %}
+
+NycOpenDatasetList = (
+Union[{% for dataset in datasets %}
+List[{{ dataset.resource._class_name }}],
+{% endfor %}]
+)
+
+
+{% for dataset in datasets %}
+
+
+@typing.overload
+def get(
+    client: Socrata,
+    _id: typing.Literal["""{{ dataset.resource.name }}"""]
+) -> List[{{ dataset.resource._class_name }}]:
+    ...
+{% endfor %}
+
+@typing.overload
+def get(
+    client: Socrata,
+    _id: str
+) -> None:
+    ...
+
+def get(client: Socrata, _id: str) -> Optional[NycOpenDatasetList]:
+{% for dataset in datasets %}
+    if _id == {{ dataset.resource._class_name }}.get_model_id():
+        return [{{ dataset.resource._class_name }}(**data) for data in client.get(_id)]
+{% endfor %}
+    return None
+
